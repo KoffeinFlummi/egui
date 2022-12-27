@@ -73,8 +73,8 @@ impl Default for CoordinatesFormatter {
 const MIN_LINE_SPACING_IN_POINTS: f64 = 6.0; // TODO(emilk): large enough for a wide label
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Copy, Clone)]
-struct AxisBools {
+#[derive(Copy, Clone, PartialEq)]
+pub(crate) struct AxisBools {
     x: bool,
     y: bool,
 }
@@ -203,7 +203,7 @@ impl LinkedCursorsGroup {
 pub struct LinkedAxisGroup {
     pub(crate) link_x: bool,
     pub(crate) link_y: bool,
-    pub(crate) bounds: Rc<Cell<Option<PlotBounds>>>,
+    pub(crate) bounds: Rc<Cell<Option<(PlotBounds, AxisBools)>>>,
 }
 
 impl LinkedAxisGroup {
@@ -242,12 +242,12 @@ impl LinkedAxisGroup {
         self.link_y = link;
     }
 
-    fn get(&self) -> Option<PlotBounds> {
+    fn get(&self) -> Option<(PlotBounds, AxisBools)> {
         self.bounds.get()
     }
 
-    fn set(&self, bounds: PlotBounds) {
-        self.bounds.set(Some(bounds));
+    fn set(&self, bounds: PlotBounds, modified: AxisBools) {
+        self.bounds.set(Some((bounds, modified)));
     }
 }
 
@@ -871,16 +871,16 @@ impl Plot {
 
         // Transfer the bounds from a link group.
         if let Some(axes) = linked_axes.as_ref() {
-            if let Some(linked_bounds) = axes.get() {
+            if let Some((linked_bounds, modified)) = axes.get() {
                 if axes.link_x {
                     bounds.set_x(&linked_bounds);
                     // Mark the axis as modified to prevent it from being changed.
-                    bounds_modified.x = true;
+                    bounds_modified.x = modified.x;
                 }
                 if axes.link_y {
                     bounds.set_y(&linked_bounds);
                     // Mark the axis as modified to prevent it from being changed.
-                    bounds_modified.y = true;
+                    bounds_modified.y = modified.y;
                 }
             }
         };
