@@ -2,7 +2,7 @@
 
 use std::{
     cell::{Cell, RefCell},
-    ops::RangeInclusive,
+    ops::{Mul, RangeInclusive},
     rc::Rc,
 };
 
@@ -89,6 +89,16 @@ impl AxisBools {
 impl From<bool> for AxisBools {
     fn from(val: bool) -> Self {
         AxisBools { x: val, y: val }
+    }
+}
+
+impl Mul<AxisBools> for Vec2 {
+    type Output = Vec2;
+
+    fn mul(mut self, rhs: AxisBools) -> Self::Output {
+        self.x *= (rhs.x as u32) as f32;
+        self.y *= (rhs.y as u32) as f32;
+        self
     }
 }
 
@@ -263,9 +273,9 @@ pub struct Plot {
 
     center_x_axis: bool,
     center_y_axis: bool,
-    allow_zoom: bool,
-    allow_drag: bool,
-    allow_scroll: bool,
+    allow_zoom: AxisBools,
+    allow_drag: AxisBools,
+    allow_scroll: AxisBools,
     allow_double_click_reset: bool,
     allow_boxed_zoom: bool,
     auto_bounds: AxisBools,
@@ -305,9 +315,9 @@ impl Plot {
 
             center_x_axis: false,
             center_y_axis: false,
-            allow_zoom: true,
-            allow_drag: true,
-            allow_scroll: true,
+            allow_zoom: true.into(),
+            allow_drag: true.into(),
+            allow_scroll: true.into(),
             allow_double_click_reset: true,
             allow_boxed_zoom: true,
             auto_bounds: false.into(),
@@ -404,13 +414,37 @@ impl Plot {
 
     /// Whether to allow zooming in the plot. Default: `true`.
     pub fn allow_zoom(mut self, on: bool) -> Self {
-        self.allow_zoom = on;
+        self.allow_zoom = on.into();
+        self
+    }
+
+    /// Whether to allow zooming the x-axis in the plot. Default: `true`.
+    pub fn allow_zoom_x(mut self, on: bool) -> Self {
+        self.allow_zoom.x = on;
+        self
+    }
+
+    /// Whether to allow zooming the y-axis in the plot. Default: `true`.
+    pub fn allow_zoom_y(mut self, on: bool) -> Self {
+        self.allow_zoom.y = on;
         self
     }
 
     /// Whether to allow scrolling in the plot. Default: `true`.
     pub fn allow_scroll(mut self, on: bool) -> Self {
-        self.allow_scroll = on;
+        self.allow_scroll = on.into();
+        self
+    }
+
+    /// Whether to allow scrolling the x-axis in the plot. Default: `true`.
+    pub fn allow_scroll_x(mut self, on: bool) -> Self {
+        self.allow_scroll.x = on;
+        self
+    }
+
+    /// Whether to allow scrolling the y-axis in the plot. Default: `true`.
+    pub fn allow_scroll_y(mut self, on: bool) -> Self {
+        self.allow_scroll.y = on;
         self
     }
 
@@ -445,7 +479,19 @@ impl Plot {
 
     /// Whether to allow dragging in the plot to move the bounds. Default: `true`.
     pub fn allow_drag(mut self, on: bool) -> Self {
-        self.allow_drag = on;
+        self.allow_drag = on.into();
+        self
+    }
+
+    /// Whether to allow dragging the x-axis in the plot to move the bounds. Default: `true`.
+    pub fn allow_drag_x(mut self, on: bool) -> Self {
+        self.allow_drag.x = on;
+        self
+    }
+
+    /// Whether to allow dragging the y-axis in the plot to move the bounds. Default: `true`.
+    pub fn allow_drag_y(mut self, on: bool) -> Self {
+        self.allow_drag.y = on;
         self
     }
 
@@ -892,10 +938,11 @@ impl Plot {
         }
 
         // Dragging
-        if allow_drag && response.dragged_by(PointerButton::Primary) {
+        if allow_drag.any() && response.dragged_by(PointerButton::Primary) {
             response = response.on_hover_cursor(CursorIcon::Grabbing);
-            transform.translate_bounds(-response.drag_delta());
-            bounds_modified = true.into();
+            let drag_delta = response.drag_delta() * allow_drag;
+            transform.translate_bounds(-drag_delta);
+            bounds_modified = allow_drag;
         }
 
         // Zooming
@@ -930,7 +977,7 @@ impl Plot {
                 if response.drag_released() {
                     let box_start_pos = transform.value_from_position(box_start_pos);
                     let box_end_pos = transform.value_from_position(box_end_pos);
-                    let new_bounds = PlotBounds {
+                    let mut new_bounds = PlotBounds {
                         min: [
                             box_start_pos.x.min(box_end_pos.x),
                             box_start_pos.y.min(box_end_pos.y),
@@ -940,6 +987,15 @@ impl Plot {
                             box_start_pos.y.max(box_end_pos.y),
                         ],
                     };
+
+                    if !allow_zoom.x {
+                        new_bounds.merge_x(transform.bounds());
+                    }
+
+                    if !allow_zoom.y {
+                        new_bounds.merge_y(transform.bounds());
+                    }
+
                     if new_bounds.is_valid() {
                         transform.set_bounds(new_bounds);
                         bounds_modified = true.into();
@@ -951,22 +1007,31 @@ impl Plot {
         }
 
         if let Some(hover_pos) = response.hover_pos() {
-            if allow_zoom {
-                let zoom_factor = if data_aspect.is_some() {
+            if allow_zoom.any() {
+                let mut zoom_factor = if data_aspect.is_some() {
                     Vec2::splat(ui.input().zoom_delta())
                 } else {
                     ui.input().zoom_delta_2d()
                 };
+
+                if !allow_zoom.x {
+                    zoom_factor.x = 1.0;
+                }
+
+                if !allow_zoom.y {
+                    zoom_factor.y = 1.0;
+                }
+
                 if zoom_factor != Vec2::splat(1.0) {
                     transform.zoom(zoom_factor, hover_pos);
-                    bounds_modified = true.into();
+                    bounds_modified = allow_zoom;
                 }
             }
-            if allow_scroll {
-                let scroll_delta = ui.input().scroll_delta;
+            if allow_scroll.any() {
+                let scroll_delta = ui.input().scroll_delta * allow_scroll;
                 if scroll_delta != Vec2::ZERO {
                     transform.translate_bounds(-scroll_delta);
-                    bounds_modified = true.into();
+                    bounds_modified = allow_scroll;
                 }
             }
         }
@@ -1014,7 +1079,7 @@ impl Plot {
         }
 
         if let Some(group) = linked_axes.as_ref() {
-            group.set(*transform.bounds());
+            group.set(*transform.bounds(), bounds_modified);
         }
 
         let memory = PlotMemory {
